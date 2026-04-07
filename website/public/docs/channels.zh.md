@@ -1391,3 +1391,161 @@ curl -X POST http://localhost:8088/api/my-echo/callback \
 - [心跳](./heartbeat) — 定时自检/摘要
 - [CLI](./cli) — init、app、cron、clean
 - [配置与工作目录](./config) — 配置文件与工作目录
+
+## Email (MS Graph)
+
+### 概述
+
+通过 Microsoft Graph API 接入邮件，支持 Outlook/Microsoft 365 邮箱。CoPaw 可以自动处理收到的邮件，并将回复发送回发件人。
+
+### 前置准备
+
+1. 拥有 Microsoft 365 账户（个人或组织）
+2. 在 Azure Portal 注册应用程序并配置权限
+
+### 获取 Azure AD 应用凭证
+
+#### 1. 创建 Azure AD 应用
+
+1. 访问 [Azure Portal](https://portal.azure.com/)
+2. 进入"应用注册"（App registrations）
+3. 点击"新注册"（New registration）
+4. 填写信息：
+   - 名称：CoPaw Email Channel（或其他名称）
+   - 支持的账户类型：选择适合你的选项（通常选"仅此组织目录中的账户"）
+   - 重定向 URI：选择"Web"，填入 `http://localhost:8080/api/channels/email_ms_graph/callback`
+5. 点击"注册"
+
+#### 2. 配置 API 权限
+
+1. 在应用页面左侧菜单选择"API 权限"（API permissions）
+2. 点击"添加权限"（Add a permission）
+3. 选择"Microsoft Graph" → "应用程序权限"（Application permissions）
+4. 添加以下权限：
+   - `Mail.ReadWrite` - 读取和写入邮件
+   - `Mail.Send` - 发送邮件
+5. 点击"授予管理员同意"（Grant admin consent）
+
+#### 3. 创建客户端密钥
+
+1. 在左侧菜单选择"证书和密钥"（Certificates & secrets）
+2. 点击"新客户端密钥"（New client secret）
+3. 添加描述，选择过期时间
+4. **重要：** 立即复制"值"（Value），这是你的 `client_secret`，之后无法再查看
+
+#### 4. 获取应用信息
+
+在"概述"（Overview）页面，记录：
+- **应用程序(客户端) ID**：这是你的 `client_id`
+- **目录(租户) ID**：这是你的 `tenant_id`
+
+### 配置 CoPaw
+
+#### 方式 1：控制台配置
+
+1. 从"控制→频道"找到 **Email (MS Graph)**
+2. 填入获取的凭证信息：
+   - Tenant ID
+   - Client ID
+   - Client Secret
+3. 选择接收模式：
+   - **Polling（轮询）**：默认每 60 秒检查一次新邮件（推荐）
+   - **Webhook**：实时接收通知（需要公网 URL）
+4. 可选配置：
+   - **Allowed Senders**：只处理特定发件人的邮件
+   - **Subject Prefix**：只处理带特定主题前缀的邮件（如 `[CoPaw]`）
+
+#### 方式 2：配置文件
+
+在 `agent.json` 中添加：
+
+```json
+"channels": {
+  "email_ms_graph": {
+    "enabled": true,
+    "tenant_id": "your-tenant-id",
+    "client_id": "your-client-id",
+    "client_secret": "your-client-secret",
+    "redirect_uri": "http://localhost:8080/api/channels/email_ms_graph/callback",
+    "receive_mode": "polling",
+    "poll_interval_sec": 60.0,
+    "allowed_senders": [],
+    "subject_prefix": ""
+  }
+}
+```
+
+**Email (MS Graph) 专属字段说明：**
+
+| 字段                  | 类型     | 默认值                                            | 说明                              |
+|-----------------------|----------|--------------------------------------------------|---------------------------------|
+| `tenant_id`           | string   | `""`（必填）                                      | Azure AD 租户 ID                 |
+| `client_id`           | string   | `""`（必填）                                      | 应用程序（客户端）ID              |
+| `client_secret`       | string   | `""`（必填）                                      | 客户端密钥                        |
+| `redirect_uri`        | string   | `http://localhost:8080/api/channels/email_ms_graph/callback` | OAuth2 回调 URI     |
+| `receive_mode`        | string   | `"polling"`                                       | 接收模式：`polling` 或 `webhook` |
+| `poll_interval_sec`   | float    | `60.0`                                            | 轮询间隔（秒）                   |
+| `webhook_url`         | string   | `""`                                              | Webhook 公网 URL（webhook 模式） |
+| `allowed_senders`     | list     | `[]`                                              | 允许的发件人邮箱列表（空=全部）   |
+| `subject_prefix`      | string   | `""`                                              | 邮件主题必需前缀（空=全部）       |
+
+### 首次授权
+
+1. 启动 CoPaw 后，查看日志会显示授权 URL
+2. 在浏览器中访问该 URL
+3. 使用你的 Microsoft 账户登录并授权
+4. 授权后会重定向到 callback URL，此时 CoPaw 会自动获取并保存 token
+5. Token 会保存在工作目录，后续自动刷新
+
+### 使用方式
+
+#### 发送邮件给 CoPaw
+
+1. 使用配置的邮箱账户收件箱
+2. 发送邮件到该邮箱（主题和正文都会作为输入）
+3. CoPaw 会处理邮件并回复
+
+#### 邮件过滤
+
+为了避免处理所有邮件，建议配置过滤：
+
+- **Allowed Senders**: 只处理特定邮箱的邮件
+  ```json
+  "allowed_senders": ["user@example.com", "admin@company.com"]
+  ```
+
+- **Subject Prefix**: 只处理带特定前缀的邮件
+  ```json
+  "subject_prefix": "[CoPaw]"
+  ```
+
+### 接收模式对比
+
+| 特性         | Polling（轮询）        | Webhook                |
+|--------------|------------------------|------------------------|
+| 实时性       | 延迟 30-60 秒          | 实时（秒级）            |
+| 配置难度     | 简单                   | 需要公网 URL 和配置     |
+| 网络要求     | 出站访问 MS Graph API  | 入站公网可访问          |
+| 推荐场景     | 个人使用，本地部署     | 生产环境，云端部署      |
+
+### 注意事项
+
+- **Token 安全**：`client_secret` 和保存的 token 文件都需要妥善保管
+- **速率限制**：MS Graph API 有速率限制（约每分钟 60 次），默认 60 秒轮询间隔是安全的
+- **会话管理**：同一邮件线程（conversation）会保持在同一会话中
+- **附件支持**：当前版本暂不支持附件处理（预留扩展接口）
+
+### 故障排查
+
+#### Token 过期
+如果看到 401 错误，CoPaw 会自动尝试刷新 token。如果刷新失败，需要重新授权。
+
+#### Webhook 无法接收通知
+- 确认 `webhook_url` 可从公网访问
+- 检查 Azure 订阅状态
+- 查看 CoPaw 日志中的订阅创建状态
+
+#### 邮件未被处理
+- 检查过滤配置（`allowed_senders`、`subject_prefix`）
+- 查看日志确认邮件是否被接收
+- 确认 `receive_mode` 和 `poll_interval_sec` 配置正确

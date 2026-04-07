@@ -202,6 +202,47 @@ class WeixinConfig(BaseChannelConfig):
     media_dir: Optional[str] = None
 
 
+class EmailMSGraphConfig(BaseChannelConfig):
+    """Email channel using Microsoft Graph API.
+
+    OAuth2 Authentication:
+        tenant_id:     Azure AD tenant ID (or 'common' for multi-tenant)
+        client_id:     Application (client) ID from Azure Portal
+        client_secret: Client secret value
+        redirect_uri:  OAuth2 redirect URI (must match Azure app config)
+
+    Receive Mode:
+        receive_mode:       "polling" or "webhook"
+        poll_interval_sec:  Polling interval in seconds (default: 60)
+
+    Webhook Configuration (when receive_mode = "webhook"):
+        webhook_url:               Public URL for webhook notifications
+        webhook_notification_path: Path for notification endpoint
+
+    Mail Filtering:
+        allowed_senders:  List of allowed sender email addresses (empty = all)
+        subject_prefix:   Only process emails with this subject prefix (empty = all)
+    """
+
+    # OAuth2 authentication
+    tenant_id: str = ""
+    client_id: str = ""
+    client_secret: str = ""
+    redirect_uri: str = "http://localhost:8080/api/channels/email_ms_graph/callback"
+
+    # Receive mode
+    receive_mode: str = "polling"  # "polling" or "webhook"
+    poll_interval_sec: float = 60.0
+
+    # Webhook configuration
+    webhook_url: str = ""
+    webhook_notification_path: str = "/api/channels/email_ms_graph/notifications"
+
+    # Mail filtering
+    allowed_senders: list = []
+    subject_prefix: str = ""
+
+
 class ChannelConfig(BaseModel):
     """Built-in channel configs; extra keys allowed for plugin channels."""
 
@@ -222,6 +263,7 @@ class ChannelConfig(BaseModel):
     xiaoyi: XiaoYiConfig = XiaoYiConfig()
     weixin: WeixinConfig = WeixinConfig()
     onebot: OneBotConfig = OneBotConfig()
+    email_ms_graph: EmailMSGraphConfig = EmailMSGraphConfig()
 
 
 class LastApiConfig(BaseModel):

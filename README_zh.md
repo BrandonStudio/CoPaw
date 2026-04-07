@@ -38,7 +38,7 @@
 >
 > **多层安全防护** — 工具防护、文件访问控制、技能安全扫描，保障运行安全。
 >
-> **全域触达** — 钉钉、飞书、微信、Discord、Telegram 等频道，一个 CoPaw 按需连接。
+> **全域触达** — 钉钉、飞书、微信、Discord、Telegram、邮件（MS Graph）等频道，一个 CoPaw 按需连接。
 >
 > <details>
 > <summary><b>你可以用 CoPaw 做什么</b></summary>
