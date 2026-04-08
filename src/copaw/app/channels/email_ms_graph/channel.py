@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 class EmailMSGraphChannel(BaseChannel):
     """Email channel using Microsoft Graph API.
-    
+
     Supports two receive modes:
     - Polling: Periodically check inbox for new messages
     - Webhook: Receive real-time notifications via MS Graph subscriptions
@@ -119,11 +119,17 @@ class EmailMSGraphChannel(BaseChannel):
                 tenant_id=config.get("tenant_id", ""),
                 client_id=config.get("client_id", ""),
                 client_secret=config.get("client_secret", ""),
-                redirect_uri=config.get("redirect_uri", "http://localhost:8080/api/channels/email_ms_graph/callback"),
+                redirect_uri=config.get(
+                    "redirect_uri",
+                    "http://localhost:8080/api/channels/email_ms_graph/callback",
+                ),
                 receive_mode=config.get("receive_mode", "polling"),
                 poll_interval_sec=float(config.get("poll_interval_sec", 60.0)),
                 webhook_url=config.get("webhook_url", ""),
-                webhook_notification_path=config.get("webhook_notification_path", ""),
+                webhook_notification_path=config.get(
+                    "webhook_notification_path",
+                    "",
+                ),
                 allowed_senders=config.get("allowed_senders", []),
                 subject_prefix=config.get("subject_prefix", ""),
                 on_reply_sent=on_reply_sent,
@@ -164,7 +170,10 @@ class EmailMSGraphChannel(BaseChannel):
             logger.warning("Email channel already running")
             return
 
-        logger.info("Starting email MS Graph channel in %s mode", self.receive_mode)
+        logger.info(
+            "Starting email MS Graph channel in %s mode",
+            self.receive_mode,
+        )
 
         token = self.auth.get_valid_token()
         if not token:
@@ -205,14 +214,19 @@ class EmailMSGraphChannel(BaseChannel):
 
     async def _start_polling_mode(self) -> None:
         """Start polling mode."""
-        logger.info("Starting polling mode with interval: %s seconds", self.poll_interval_sec)
+        logger.info(
+            "Starting polling mode with interval: %s seconds",
+            self.poll_interval_sec,
+        )
         self._last_check_time = datetime.now(timezone.utc) - timedelta(hours=1)
         self._poll_task = asyncio.create_task(self._poll_loop())
 
     async def _start_webhook_mode(self) -> None:
         """Start webhook mode."""
         if not self.webhook_url:
-            logger.error("webhook_url not configured, cannot start webhook mode")
+            logger.error(
+                "webhook_url not configured, cannot start webhook mode",
+            )
             self._running = False
             return
 
@@ -266,7 +280,10 @@ class EmailMSGraphChannel(BaseChannel):
                 list(self.allowed_senders),
                 self.subject_prefix,
             ):
-                logger.debug("Skipping message %s due to filters", message_id[:20])
+                logger.debug(
+                    "Skipping message %s due to filters",
+                    message_id[:20],
+                )
                 self._processed_message_ids.add(message_id)
                 continue
 
@@ -277,18 +294,25 @@ class EmailMSGraphChannel(BaseChannel):
 
         if len(self._processed_message_ids) > 1000:
             self._processed_message_ids = set(
-                list(self._processed_message_ids)[-1000:]
+                list(self._processed_message_ids)[-1000:],
             )
 
-    def _handle_webhook_notification(self, notification: dict[str, Any]) -> None:
+    def _handle_webhook_notification(
+        self,
+        notification: dict[str, Any],
+    ) -> None:
         """Handle webhook notification."""
         resource = notification.get("resource", "")
         logger.info("Received webhook notification for resource: %s", resource)
 
         import re
+
         match = re.search(r"messages\('([^']+)'\)", resource)
         if not match:
-            logger.warning("Could not extract message ID from resource: %s", resource)
+            logger.warning(
+                "Could not extract message ID from resource: %s",
+                resource,
+            )
             return
 
         message_id = match.group(1)
@@ -341,13 +365,16 @@ class EmailMSGraphChannel(BaseChannel):
             text_content = content_value
 
         content_parts = [
-            TextContent(type=ContentType.TEXT, text=text_content)
+            TextContent(type=ContentType.TEXT, text=text_content),
         ]
 
         # TODO: Extract and process attachments
 
         conversation_id = extract_conversation_id(message)
-        session_id = self.resolve_session_id(sender_email, {"conversation_id": conversation_id})
+        session_id = self.resolve_session_id(
+            sender_email,
+            {"conversation_id": conversation_id},
+        )
 
         payload = {
             "channel_id": self.channel,
@@ -379,10 +406,15 @@ class EmailMSGraphChannel(BaseChannel):
 
     def build_agent_request_from_native(self, native_payload: Any) -> Any:
         """Convert email payload to AgentRequest."""
-        from agentscope_runtime.engine.schemas.agent_schemas import AgentRequest
+        from agentscope_runtime.engine.schemas.agent_schemas import (
+            AgentRequest,
+        )
 
         if not isinstance(native_payload, dict):
-            logger.warning("Invalid native payload type: %s", type(native_payload))
+            logger.warning(
+                "Invalid native payload type: %s",
+                type(native_payload),
+            )
             return None
 
         sender_id = native_payload.get("sender_id", "")
@@ -442,7 +474,10 @@ class EmailMSGraphChannel(BaseChannel):
         body_html = text_to_html(body_text)
 
         if original_message_id:
-            logger.info("Sending reply to message %s", original_message_id[:20])
+            logger.info(
+                "Sending reply to message %s",
+                original_message_id[:20],
+            )
             success = await self.graph_client.send_reply(
                 message_id=original_message_id,
                 body_content=body_html,

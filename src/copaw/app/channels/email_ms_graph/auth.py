@@ -31,7 +31,7 @@ class MSGraphAuthManager:
         token_file: Optional[Path] = None,
     ):
         """Initialize auth manager.
-        
+
         Args:
             tenant_id: Azure AD tenant ID or 'common' for multi-tenant
             client_id: Application (client) ID
@@ -43,28 +43,29 @@ class MSGraphAuthManager:
         self.client_id = client_id
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
-        
+
         # Token storage
         if token_file is None:
             from copaw.constant import WORKING_DIR
+
             token_file = WORKING_DIR / "email_ms_graph_token.json"
         self.token_file = Path(token_file)
-        
+
         # Build authority URL
         authority = f"https://login.microsoftonline.com/{tenant_id}"
-        
+
         # Create MSAL confidential client
         self.app = msal.ConfidentialClientApplication(
             client_id=client_id,
             client_credential=client_secret,
             authority=authority,
         )
-        
+
         self._cached_token: Optional[Dict[str, Any]] = None
 
     def get_authorization_url(self) -> str:
         """Generate OAuth2 authorization URL for user consent.
-        
+
         Returns:
             Authorization URL to redirect user to
         """
@@ -77,10 +78,10 @@ class MSGraphAuthManager:
 
     def get_token_from_code(self, auth_code: str) -> Optional[Dict[str, Any]]:
         """Exchange authorization code for access token.
-        
+
         Args:
             auth_code: Authorization code from OAuth2 callback
-            
+
         Returns:
             Token response dict with access_token, refresh_token, etc.
             None if failed
@@ -91,9 +92,11 @@ class MSGraphAuthManager:
                 scopes=GRAPH_SCOPES,
                 redirect_uri=self.redirect_uri,
             )
-            
+
             if "access_token" in result:
-                logger.info("Successfully acquired token from authorization code")
+                logger.info(
+                    "Successfully acquired token from authorization code",
+                )
                 self._cached_token = result
                 self.save_token(result)
                 return result
@@ -112,7 +115,7 @@ class MSGraphAuthManager:
 
     def refresh_token(self) -> Optional[Dict[str, Any]]:
         """Refresh access token using refresh token.
-        
+
         Returns:
             New token response or None if failed
         """
@@ -121,18 +124,18 @@ class MSGraphAuthManager:
         if not token:
             logger.warning("No token to refresh")
             return None
-        
+
         refresh_token_str = token.get("refresh_token")
         if not refresh_token_str:
             logger.warning("No refresh token available")
             return None
-        
+
         try:
             result = self.app.acquire_token_by_refresh_token(
                 refresh_token=refresh_token_str,
                 scopes=GRAPH_SCOPES,
             )
-            
+
             if "access_token" in result:
                 logger.info("Successfully refreshed access token")
                 self._cached_token = result
@@ -153,7 +156,7 @@ class MSGraphAuthManager:
 
     def get_valid_token(self) -> Optional[str]:
         """Get a valid access token, refreshing if necessary.
-        
+
         Returns:
             Valid access token string or None if unable to get token
         """
@@ -162,7 +165,7 @@ class MSGraphAuthManager:
         if not token:
             logger.warning("No token available. User needs to authorize.")
             return None
-        
+
         # Check if token is still valid (MSAL handles expiry internally)
         access_token = token.get("access_token")
         if not access_token:
@@ -172,14 +175,14 @@ class MSGraphAuthManager:
             if token:
                 return token.get("access_token")
             return None
-        
+
         # TODO: Check token expiry and refresh proactively
         # For now, rely on 401 responses to trigger refresh
         return access_token
 
     def save_token(self, token: Dict[str, Any]) -> None:
         """Persist token to disk.
-        
+
         Args:
             token: Token response to save
         """
@@ -193,14 +196,14 @@ class MSGraphAuthManager:
 
     def load_token(self) -> Optional[Dict[str, Any]]:
         """Load token from disk.
-        
+
         Returns:
             Token dict or None if not found
         """
         if not self.token_file.exists():
             logger.debug("Token file not found: %s", self.token_file)
             return None
-        
+
         try:
             with open(self.token_file, "r", encoding="utf-8") as f:
                 token = json.load(f)

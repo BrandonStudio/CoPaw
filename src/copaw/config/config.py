@@ -228,7 +228,9 @@ class EmailMSGraphConfig(BaseChannelConfig):
     tenant_id: str = ""
     client_id: str = ""
     client_secret: str = ""
-    redirect_uri: str = "http://localhost:8080/api/channels/email_ms_graph/callback"
+    redirect_uri: str = (
+        "http://localhost:8080/api/channels/email_ms_graph/callback"
+    )
 
     # Receive mode
     receive_mode: str = "polling"  # "polling" or "webhook"
@@ -236,7 +238,9 @@ class EmailMSGraphConfig(BaseChannelConfig):
 
     # Webhook configuration
     webhook_url: str = ""
-    webhook_notification_path: str = "/api/channels/email_ms_graph/notifications"
+    webhook_notification_path: str = (
+        "/api/channels/email_ms_graph/notifications"
+    )
 
     # Mail filtering
     allowed_senders: list = []

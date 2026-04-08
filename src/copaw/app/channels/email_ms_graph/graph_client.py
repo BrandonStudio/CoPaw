@@ -26,7 +26,7 @@ class MSGraphClient:
         timeout: float = DEFAULT_TIMEOUT,
     ):
         """Initialize Graph API client.
-        
+
         Args:
             auth_manager: Authentication manager instance
             timeout: HTTP request timeout in seconds
@@ -55,14 +55,14 @@ class MSGraphClient:
         retry_count: int = 1,
     ) -> Optional[Dict[str, Any]]:
         """Make HTTP request to Graph API with retry logic.
-        
+
         Args:
             method: HTTP method (GET, POST, etc.)
             endpoint: API endpoint path (will be appended to base URL)
             json_data: JSON body for POST/PATCH requests
             params: Query parameters
             retry_count: Number of retries on failure
-            
+
         Returns:
             Response JSON or None if failed
         """
@@ -70,15 +70,15 @@ class MSGraphClient:
         if not token:
             logger.error("No valid access token available")
             return None
-        
+
         url = f"{GRAPH_API_ENDPOINT}{endpoint}"
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
         }
-        
+
         client = await self._get_http_client()
-        
+
         for attempt in range(retry_count + 1):
             try:
                 response = await client.request(
@@ -88,7 +88,7 @@ class MSGraphClient:
                     json=json_data,
                     params=params,
                 )
-                
+
                 if response.status_code == 401:
                     # Token expired, try to refresh
                     logger.info("Token expired (401), attempting refresh")
@@ -101,16 +101,21 @@ class MSGraphClient:
                     else:
                         logger.error("Failed to refresh token")
                         return None
-                
+
                 if response.status_code == 429:
                     # Rate limited
-                    retry_after = int(response.headers.get("Retry-After", "60"))
-                    logger.warning("Rate limited, waiting %s seconds", retry_after)
+                    retry_after = int(
+                        response.headers.get("Retry-After", "60"),
+                    )
+                    logger.warning(
+                        "Rate limited, waiting %s seconds",
+                        retry_after,
+                    )
                     if attempt < retry_count:
                         await asyncio.sleep(retry_after)
                         continue
                     return None
-                
+
                 if response.status_code >= 400:
                     logger.error(
                         "Graph API request failed: %s %s - Status: %s, Response: %s",
@@ -120,22 +125,26 @@ class MSGraphClient:
                         response.text[:500],
                     )
                     return None
-                
+
                 return response.json()
-                
+
             except httpx.TimeoutException:
-                logger.warning("Request timeout (attempt %s/%s)", attempt + 1, retry_count + 1)
+                logger.warning(
+                    "Request timeout (attempt %s/%s)",
+                    attempt + 1,
+                    retry_count + 1,
+                )
                 if attempt < retry_count:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    await asyncio.sleep(2**attempt)  # Exponential backoff
                     continue
                 return None
             except Exception as e:
                 logger.exception("Error making Graph API request: %s", e)
                 if attempt < retry_count:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                     continue
                 return None
-        
+
         return None
 
     async def list_messages(
@@ -146,25 +155,28 @@ class MSGraphClient:
         top: int = 10,
     ) -> List[Dict[str, Any]]:
         """List messages from a mail folder.
-        
+
         Args:
             folder: Mail folder name (inbox, sentitems, etc.)
             filter_query: OData filter expression
             select_fields: List of fields to return
             top: Maximum number of messages to return
-            
+
         Returns:
             List of message objects
         """
         endpoint = f"/me/mailFolders/{folder}/messages"
-        params: Dict[str, Any] = {"$top": top, "$orderby": "receivedDateTime desc"}
-        
+        params: Dict[str, Any] = {
+            "$top": top,
+            "$orderby": "receivedDateTime desc",
+        }
+
         if filter_query:
             params["$filter"] = filter_query
-        
+
         if select_fields:
             params["$select"] = ",".join(select_fields)
-        
+
         result = await self._make_request("GET", endpoint, params=params)
         if result and "value" in result:
             return result["value"]
@@ -172,10 +184,10 @@ class MSGraphClient:
 
     async def get_message(self, message_id: str) -> Optional[Dict[str, Any]]:
         """Get a specific message by ID.
-        
+
         Args:
             message_id: Message ID
-            
+
         Returns:
             Message object or None if not found
         """
@@ -192,7 +204,7 @@ class MSGraphClient:
         bcc_recipients: Optional[List[str]] = None,
     ) -> bool:
         """Send a new email.
-        
+
         Args:
             to_recipients: List of recipient email addresses
             subject: Email subject
@@ -200,7 +212,7 @@ class MSGraphClient:
             body_type: Body content type ("Text" or "HTML")
             cc_recipients: CC recipients
             bcc_recipients: BCC recipients
-            
+
         Returns:
             True if sent successfully
         """
@@ -212,23 +224,28 @@ class MSGraphClient:
                     "content": body_content,
                 },
                 "toRecipients": [
-                    {"emailAddress": {"address": addr}} for addr in to_recipients
+                    {"emailAddress": {"address": addr}}
+                    for addr in to_recipients
                 ],
-            }
+            },
         }
-        
+
         if cc_recipients:
             message_data["message"]["ccRecipients"] = [
                 {"emailAddress": {"address": addr}} for addr in cc_recipients
             ]
-        
+
         if bcc_recipients:
             message_data["message"]["bccRecipients"] = [
                 {"emailAddress": {"address": addr}} for addr in bcc_recipients
             ]
-        
+
         endpoint = "/me/sendMail"
-        result = await self._make_request("POST", endpoint, json_data=message_data)
+        result = await self._make_request(
+            "POST",
+            endpoint,
+            json_data=message_data,
+        )
         return result is not None
 
     async def send_reply(
@@ -238,12 +255,12 @@ class MSGraphClient:
         body_type: str = "HTML",
     ) -> bool:
         """Reply to an existing message.
-        
+
         Args:
             message_id: ID of message to reply to
             body_content: Reply body content
             body_type: Body content type ("Text" or "HTML")
-            
+
         Returns:
             True if sent successfully
         """
@@ -253,20 +270,24 @@ class MSGraphClient:
                 "body": {
                     "contentType": body_type,
                     "content": body_content,
-                }
-            }
+                },
+            },
         }
-        
+
         endpoint = f"/me/messages/{message_id}/reply"
-        result = await self._make_request("POST", endpoint, json_data=reply_data)
+        result = await self._make_request(
+            "POST",
+            endpoint,
+            json_data=reply_data,
+        )
         return result is not None
 
     async def mark_as_read(self, message_id: str) -> bool:
         """Mark a message as read.
-        
+
         Args:
             message_id: Message ID
-            
+
         Returns:
             True if marked successfully
         """
@@ -281,19 +302,20 @@ class MSGraphClient:
         expiration_minutes: int = 4230,  # Max: 3 days (4320 min), use 4230 for safety
     ) -> Optional[Dict[str, Any]]:
         """Create a webhook subscription for email notifications.
-        
+
         Args:
             notification_url: Public URL to receive webhook notifications
             expiration_minutes: Subscription duration in minutes (max 4320 = 3 days)
-            
+
         Returns:
             Subscription object with id and expirationDateTime, or None if failed
         """
         # Calculate expiration time
         expiration_dt = datetime.now(timezone.utc)
         from datetime import timedelta
+
         expiration_dt += timedelta(minutes=expiration_minutes)
-        
+
         subscription_data = {
             "changeType": "created",
             "notificationUrl": notification_url,
@@ -301,9 +323,13 @@ class MSGraphClient:
             "expirationDateTime": expiration_dt.isoformat(),
             "clientState": "CoPawEmailChannel",  # For validation
         }
-        
+
         endpoint = "/subscriptions"
-        return await self._make_request("POST", endpoint, json_data=subscription_data)
+        return await self._make_request(
+            "POST",
+            endpoint,
+            json_data=subscription_data,
+        )
 
     async def renew_subscription(
         self,
@@ -311,31 +337,36 @@ class MSGraphClient:
         expiration_minutes: int = 4230,
     ) -> Optional[Dict[str, Any]]:
         """Renew an existing subscription.
-        
+
         Args:
             subscription_id: Subscription ID to renew
             expiration_minutes: New expiration duration in minutes
-            
+
         Returns:
             Updated subscription object or None if failed
         """
         expiration_dt = datetime.now(timezone.utc)
         from datetime import timedelta
+
         expiration_dt += timedelta(minutes=expiration_minutes)
-        
+
         update_data = {
             "expirationDateTime": expiration_dt.isoformat(),
         }
-        
+
         endpoint = f"/subscriptions/{subscription_id}"
-        return await self._make_request("PATCH", endpoint, json_data=update_data)
+        return await self._make_request(
+            "PATCH",
+            endpoint,
+            json_data=update_data,
+        )
 
     async def delete_subscription(self, subscription_id: str) -> bool:
         """Delete a subscription.
-        
+
         Args:
             subscription_id: Subscription ID to delete
-            
+
         Returns:
             True if deleted successfully
         """

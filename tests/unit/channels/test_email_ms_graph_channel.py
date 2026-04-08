@@ -26,6 +26,7 @@ from copaw.app.channels.email_ms_graph.utils import (
 @pytest.fixture
 def mock_process():
     """Mock process handler."""
+
     async def _noop_process(_request):
         yield
 
@@ -37,7 +38,9 @@ def mock_auth_manager():
     """Mock auth manager."""
     mock = MagicMock(spec=MSGraphAuthManager)
     mock.get_valid_token.return_value = "mock_token"
-    mock.get_authorization_url.return_value = "https://login.example.com/authorize"
+    mock.get_authorization_url.return_value = (
+        "https://login.example.com/authorize"
+    )
     return mock
 
 
@@ -52,12 +55,12 @@ def sample_email_message():
         "from": {
             "emailAddress": {
                 "name": "Test User",
-                "address": "test@example.com"
-            }
+                "address": "test@example.com",
+            },
         },
         "body": {
             "contentType": "HTML",
-            "content": "<html><body><p>Hello, this is a test.</p></body></html>"
+            "content": "<html><body><p>Hello, this is a test.</p></body></html>",
         },
         "isRead": False,
         "hasAttachments": False,
@@ -214,7 +217,11 @@ class TestSessionIdResolution:
     """Test session ID resolution."""
 
     @patch("copaw.app.channels.email_ms_graph.channel.MSGraphAuthManager")
-    def test_resolve_session_id_with_conversation(self, mock_auth_class, mock_process):
+    def test_resolve_session_id_with_conversation(
+        self,
+        mock_auth_class,
+        mock_process,
+    ):
         """Test session ID includes conversation ID."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
@@ -233,7 +240,11 @@ class TestSessionIdResolution:
         assert session_id == "email_ms_graph::user@example.com::conv123"
 
     @patch("copaw.app.channels.email_ms_graph.channel.MSGraphAuthManager")
-    def test_resolve_session_id_without_conversation(self, mock_auth_class, mock_process):
+    def test_resolve_session_id_without_conversation(
+        self,
+        mock_auth_class,
+        mock_process,
+    ):
         """Test session ID fallback without conversation ID."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
@@ -340,7 +351,11 @@ class TestAgentRequestBuilding:
     """Test building AgentRequest from email payload."""
 
     @patch("copaw.app.channels.email_ms_graph.channel.MSGraphAuthManager")
-    def test_build_agent_request_from_native(self, mock_auth_class, mock_process):
+    def test_build_agent_request_from_native(
+        self,
+        mock_auth_class,
+        mock_process,
+    ):
         """Test building AgentRequest from native email payload."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
@@ -360,7 +375,7 @@ class TestAgentRequestBuilding:
             "channel_id": "email_ms_graph",
             "sender_id": "test@example.com",
             "content_parts": [
-                TextContent(type=ContentType.TEXT, text="Hello")
+                TextContent(type=ContentType.TEXT, text="Hello"),
             ],
             "meta": {
                 "conversation_id": "conv123",
@@ -383,7 +398,9 @@ class TestAgentRequestBuilding:
 
 def test_module_import():
     """Test that the module can be imported without errors."""
-    from copaw.app.channels.email_ms_graph import EmailMSGraphChannel as ImportedChannel
+    from copaw.app.channels.email_ms_graph import (
+        EmailMSGraphChannel as ImportedChannel,
+    )
     from copaw.app.channels.email_ms_graph.auth import MSGraphAuthManager
     from copaw.app.channels.email_ms_graph.graph_client import MSGraphClient
 
