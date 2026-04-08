@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+from collections import deque
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union
-from datetime import datetime, timezone, timedelta
 
 from agentscope_runtime.engine.schemas.agent_schemas import (
     TextContent,
     ContentType,
-    Message,
-    MessageType,
 )
 
 from ....config.config import EmailMSGraphConfig
@@ -19,7 +19,6 @@ from ..base import (
     BaseChannel,
     OnReplySent,
     ProcessHandler,
-    OutgoingContentPart,
 )
 from .auth import MSGraphAuthManager
 from .graph_client import MSGraphClient
@@ -50,6 +49,8 @@ class EmailMSGraphChannel(BaseChannel):
     def __init__(
         self,
         process: ProcessHandler,
+        auth_mode: str,
+        mailbox_id: str,
         tenant_id: str,
         client_id: str,
         client_secret: str,
@@ -82,14 +83,18 @@ class EmailMSGraphChannel(BaseChannel):
             deny_message=deny_message,
         )
 
-        self.auth = MSGraphAuthManager(
+        self.auth_manager = MSGraphAuthManager(
             tenant_id=tenant_id,
             client_id=client_id,
             client_secret=client_secret,
             redirect_uri=redirect_uri,
+            auth_mode=auth_mode,
         )
 
-        self.graph_client = MSGraphClient(auth_manager=self.auth)
+        self.graph_client = MSGraphClient(
+            auth_manager=self.auth_manager,
+            mailbox_id=mailbox_id,
+        )
         self.receive_mode = receive_mode
         self.poll_interval_sec = poll_interval_sec
         self.webhook_url = webhook_url
@@ -100,7 +105,7 @@ class EmailMSGraphChannel(BaseChannel):
         self._poll_task: Optional[asyncio.Task] = None
         self._webhook_manager: Optional[WebhookManager] = None
         self._last_check_time: Optional[datetime] = None
-        self._processed_message_ids: set[str] = set()
+        self._processed_message_ids: deque[str] = deque(maxlen=1000)
 
     @classmethod
     def from_config(
@@ -116,6 +121,8 @@ class EmailMSGraphChannel(BaseChannel):
         if isinstance(config, dict):
             return cls(
                 process=process,
+                auth_mode=config.get("auth_mode", "delegated"),
+                mailbox_id=config.get("mailbox_id", "me"),
                 tenant_id=config.get("tenant_id", ""),
                 client_id=config.get("client_id", ""),
                 client_secret=config.get("client_secret", ""),
@@ -144,6 +151,8 @@ class EmailMSGraphChannel(BaseChannel):
         else:
             return cls(
                 process=process,
+                auth_mode=config.auth_mode,
+                mailbox_id=config.mailbox_id,
                 tenant_id=config.tenant_id,
                 client_id=config.client_id,
                 client_secret=config.client_secret,
@@ -175,12 +184,18 @@ class EmailMSGraphChannel(BaseChannel):
             self.receive_mode,
         )
 
-        token = self.auth.get_valid_token()
+        # Get access token
+        token = self.auth_manager.get_valid_token()
         if not token:
-            logger.error(
-                "No valid access token. Please authorize at: %s",
-                self.auth.get_authorization_url(),
-            )
+            if self.auth_manager.auth_mode == "delegated":
+                logger.error(
+                    "No valid access token. Please authorize at: %s",
+                    self.auth_manager.get_authorization_url(),
+                )
+            else:
+                logger.error(
+                    "Failed to acquire app-only token. Check client credentials.",
+                )
             return
 
         self._running = True
@@ -277,23 +292,23 @@ class EmailMSGraphChannel(BaseChannel):
 
             if not should_process_message(
                 message,
-                list(self.allowed_senders),
+                self.allowed_senders,
                 self.subject_prefix,
             ):
                 logger.debug(
                     "Skipping message %s due to filters",
                     message_id[:20],
                 )
-                self._processed_message_ids.add(message_id)
+                self._processed_message_ids.append(message_id)
                 continue
 
             await self._process_email(message)
-            self._processed_message_ids.add(message_id)
+            self._processed_message_ids.append(message_id)
 
         self._last_check_time = datetime.now(timezone.utc)
 
         if len(self._processed_message_ids) > 1000:
-            self._processed_message_ids = set(
+            self._processed_message_ids = deque(
                 list(self._processed_message_ids)[-1000:],
             )
 
@@ -304,8 +319,6 @@ class EmailMSGraphChannel(BaseChannel):
         """Handle webhook notification."""
         resource = notification.get("resource", "")
         logger.info("Received webhook notification for resource: %s", resource)
-
-        import re
 
         match = re.search(r"messages\('([^']+)'\)", resource)
         if not match:
@@ -331,15 +344,15 @@ class EmailMSGraphChannel(BaseChannel):
 
         if not should_process_message(
             message,
-            list(self.allowed_senders),
+            self.allowed_senders,
             self.subject_prefix,
         ):
             logger.debug("Skipping message %s due to filters", message_id[:20])
-            self._processed_message_ids.add(message_id)
+            self._processed_message_ids.append(message_id)
             return
 
         await self._process_email(message)
-        self._processed_message_ids.add(message_id)
+        self._processed_message_ids.append(message_id)
 
     async def _process_email(self, message: dict[str, Any]) -> None:
         """Process an email message."""
@@ -371,10 +384,6 @@ class EmailMSGraphChannel(BaseChannel):
         # TODO: Extract and process attachments
 
         conversation_id = extract_conversation_id(message)
-        session_id = self.resolve_session_id(
-            sender_email,
-            {"conversation_id": conversation_id},
-        )
 
         payload = {
             "channel_id": self.channel,
@@ -396,26 +405,28 @@ class EmailMSGraphChannel(BaseChannel):
 
         await self.graph_client.mark_as_read(message_id)
 
-    def resolve_session_id(self, sender_id: str, meta: dict) -> str:
+    def resolve_session_id(
+        self,
+        sender_id: str,
+        channel_meta: dict[str, Any] | None = None,
+    ) -> str:
         """Resolve session ID."""
-        conversation_id = meta.get("conversation_id", "")
+        conversation_id = (
+            channel_meta.get("conversation_id", "") if channel_meta else ""
+        )
         if conversation_id:
             return f"{self.channel}::{sender_id}::{conversation_id}"
         else:
             return f"{self.channel}::{sender_id}"
 
-    def build_agent_request_from_native(self, native_payload: Any) -> Any:
+    def build_agent_request_from_native(self, native_payload: Any):
         """Convert email payload to AgentRequest."""
-        from agentscope_runtime.engine.schemas.agent_schemas import (
-            AgentRequest,
-        )
-
         if not isinstance(native_payload, dict):
             logger.warning(
                 "Invalid native payload type: %s",
                 type(native_payload),
             )
-            return None
+            raise ValueError("Invalid native payload type")
 
         sender_id = native_payload.get("sender_id", "")
         content_parts = native_payload.get("content_parts", [])
@@ -423,21 +434,18 @@ class EmailMSGraphChannel(BaseChannel):
 
         session_id = self.resolve_session_id(sender_id, meta)
 
-        message = Message(
-            type=MessageType.MESSAGE,
-            content=content_parts,
-        )
-
-        request = AgentRequest(
-            input=[message],
+        request = self.build_agent_request_from_user_content(
+            channel_id=self.channel,
+            sender_id=sender_id,
             session_id=session_id,
-            user_id=sender_id,
-            channel=self.channel,
+            content_parts=content_parts,
+            channel_meta=meta,
         )
+        request.channel_meta = meta
 
         return request
 
-    async def send_response(
+    async def send_response(  # pylint: disable=too-many-branches
         self,
         to_handle: str,
         response: Any,
@@ -481,7 +489,6 @@ class EmailMSGraphChannel(BaseChannel):
             success = await self.graph_client.send_reply(
                 message_id=original_message_id,
                 body_content=body_html,
-                body_type="HTML",
             )
         else:
             logger.info("Sending new email to %s", sender_email)

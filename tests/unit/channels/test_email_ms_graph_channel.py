@@ -2,13 +2,12 @@
 """Unit tests for Email MS Graph channel."""
 from __future__ import annotations
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from typing import Any
+
+import pytest
 
 from copaw.app.channels.email_ms_graph.channel import EmailMSGraphChannel
 from copaw.app.channels.email_ms_graph.auth import MSGraphAuthManager
-from copaw.app.channels.email_ms_graph.graph_client import MSGraphClient
 from copaw.app.channels.email_ms_graph.utils import (
     html_to_text,
     text_to_html,
@@ -108,6 +107,8 @@ class TestChannelConfiguration:
         """Test channel has correct identifier."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
+            auth_mode="delegated",
+            mailbox_id="me",
             process=mock_process,
             tenant_id="test",
             client_id="test",
@@ -164,7 +165,7 @@ class TestUtils:
         """Test message processing with no filters."""
         should_process = should_process_message(
             sample_email_message,
-            allowed_senders=[],
+            allowed_senders=set(),
             subject_prefix="",
         )
         assert should_process is True
@@ -174,7 +175,7 @@ class TestUtils:
         # Should process - sender in allowlist
         should_process = should_process_message(
             sample_email_message,
-            allowed_senders=["test@example.com"],
+            allowed_senders={"test@example.com"},
             subject_prefix="",
         )
         assert should_process is True
@@ -182,7 +183,7 @@ class TestUtils:
         # Should not process - sender not in allowlist
         should_process = should_process_message(
             sample_email_message,
-            allowed_senders=["other@example.com"],
+            allowed_senders={"other@example.com"},
             subject_prefix="",
         )
         assert should_process is False
@@ -193,7 +194,7 @@ class TestUtils:
         sample_email_message["subject"] = "[CoPaw] Test Email"
         should_process = should_process_message(
             sample_email_message,
-            allowed_senders=[],
+            allowed_senders=set(),
             subject_prefix="[CoPaw]",
         )
         assert should_process is True
@@ -202,7 +203,7 @@ class TestUtils:
         sample_email_message["subject"] = "Test Email"
         should_process = should_process_message(
             sample_email_message,
-            allowed_senders=[],
+            allowed_senders=set(),
             subject_prefix="[CoPaw]",
         )
         assert should_process is False
@@ -225,6 +226,8 @@ class TestSessionIdResolution:
         """Test session ID includes conversation ID."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
+            auth_mode="delegated",
+            mailbox_id="me",
             process=mock_process,
             tenant_id="test",
             client_id="test",
@@ -248,6 +251,8 @@ class TestSessionIdResolution:
         """Test session ID fallback without conversation ID."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
+            auth_mode="delegated",
+            mailbox_id="me",
             process=mock_process,
             tenant_id="test",
             client_id="test",
@@ -282,6 +287,8 @@ class TestMessageProcessing:
         """Test processing email enqueues payload."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
+            auth_mode="delegated",
+            mailbox_id="me",
             process=mock_process,
             tenant_id="test",
             client_id="test",
@@ -320,6 +327,8 @@ class TestMessageProcessing:
         """Test HTML email body is converted to text."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
+            auth_mode="delegated",
+            mailbox_id="me",
             process=mock_process,
             tenant_id="test",
             client_id="test",
@@ -359,6 +368,8 @@ class TestAgentRequestBuilding:
         """Test building AgentRequest from native email payload."""
         mock_auth_class.return_value = MagicMock(spec=MSGraphAuthManager)
         channel = EmailMSGraphChannel(
+            auth_mode="delegated",
+            mailbox_id="me",
             process=mock_process,
             tenant_id="test",
             client_id="test",
@@ -388,7 +399,7 @@ class TestAgentRequestBuilding:
         assert request is not None
         assert request.channel == "email_ms_graph"
         assert request.user_id == "test@example.com"
-        assert "conv123" in request.session_id
+        assert request.session_id and "conv123" in request.session_id
 
 
 # ---------------------------------------------------------------------------

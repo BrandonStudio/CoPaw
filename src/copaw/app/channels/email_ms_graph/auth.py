@@ -5,22 +5,33 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Any
 
 import msal
 
+if TYPE_CHECKING:
+    from typing import Optional
+
 logger = logging.getLogger(__name__)
 
-# MS Graph API scopes needed for email operations
-GRAPH_SCOPES = [
+# MS Graph API scopes for delegated (user) access
+DELEGATED_SCOPES = [
     "Mail.ReadWrite",
     "Mail.Send",
     "offline_access",  # For refresh token
 ]
 
+# MS Graph API scopes for application (app-only) access
+APPLICATION_SCOPE = "https://graph.microsoft.com/.default"
+
 
 class MSGraphAuthManager:
-    """Manages OAuth2 authentication for Microsoft Graph API."""
+    """Manages OAuth2 authentication for Microsoft Graph API.
+
+    Supports two authentication modes:
+    - Delegated: Authorization Code Flow (requires user consent)
+    - Application: Client Credentials Flow (app-only, no user)
+    """
 
     def __init__(
         self,
@@ -28,6 +39,7 @@ class MSGraphAuthManager:
         client_id: str,
         client_secret: str,
         redirect_uri: str,
+        auth_mode: str = "delegated",
         token_file: Optional[Path] = None,
     ):
         """Initialize auth manager.
@@ -36,13 +48,15 @@ class MSGraphAuthManager:
             tenant_id: Azure AD tenant ID or 'common' for multi-tenant
             client_id: Application (client) ID
             client_secret: Client secret value
-            redirect_uri: OAuth2 redirect URI
+            redirect_uri: OAuth2 redirect URI (required for delegated mode)
+            auth_mode: "delegated" or "application"
             token_file: Path to persist token (default: working_dir/email_ms_graph_token.json)
         """
         self.tenant_id = tenant_id
         self.client_id = client_id
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
+        self.auth_mode = auth_mode
 
         # Token storage
         if token_file is None:
@@ -61,23 +75,31 @@ class MSGraphAuthManager:
             authority=authority,
         )
 
-        self._cached_token: Optional[Dict[str, Any]] = None
+        self._cached_token: Optional[dict[str, Any]] = None
 
     def get_authorization_url(self) -> str:
-        """Generate OAuth2 authorization URL for user consent.
+        """Generate OAuth2 authorization URL for user consent (delegated mode only).
 
         Returns:
             Authorization URL to redirect user to
+
+        Raises:
+            ValueError: If auth_mode is not "delegated"
         """
+        if self.auth_mode != "delegated":
+            raise ValueError(
+                "get_authorization_url() only works in delegated mode",
+            )
+
         auth_url = self.app.get_authorization_request_url(
-            scopes=GRAPH_SCOPES,
+            scopes=DELEGATED_SCOPES,
             redirect_uri=self.redirect_uri,
         )
         logger.info("Generated authorization URL: %s", auth_url)
         return auth_url
 
-    def get_token_from_code(self, auth_code: str) -> Optional[Dict[str, Any]]:
-        """Exchange authorization code for access token.
+    def get_token_from_code(self, auth_code: str) -> Optional[dict[str, Any]]:
+        """Exchange authorization code for access token (delegated mode only).
 
         Args:
             auth_code: Authorization code from OAuth2 callback
@@ -85,11 +107,19 @@ class MSGraphAuthManager:
         Returns:
             Token response dict with access_token, refresh_token, etc.
             None if failed
+
+        Raises:
+            ValueError: If auth_mode is not "delegated"
         """
+        if self.auth_mode != "delegated":
+            raise ValueError(
+                "get_token_from_code() only works in delegated mode",
+            )
+
         try:
             result = self.app.acquire_token_by_authorization_code(
                 code=auth_code,
-                scopes=GRAPH_SCOPES,
+                scopes=DELEGATED_SCOPES,
                 redirect_uri=self.redirect_uri,
             )
 
@@ -113,12 +143,62 @@ class MSGraphAuthManager:
             logger.exception("Error acquiring token from code: %s", e)
             return None
 
-    def refresh_token(self) -> Optional[Dict[str, Any]]:
-        """Refresh access token using refresh token.
+    def get_app_only_token(self) -> Optional[dict[str, Any]]:
+        """Get app-only access token using client credentials (application mode only).
+
+        Uses Client Credentials Flow - no user interaction required.
+
+        Returns:
+            Token response dict with access_token
+            None if failed
+
+        Raises:
+            ValueError: If auth_mode is not "application"
+        """
+        if self.auth_mode != "application":
+            raise ValueError(
+                "get_app_only_token() only works in application mode",
+            )
+
+        try:
+            result = self.app.acquire_token_for_client(
+                scopes=[APPLICATION_SCOPE],
+            )
+            if not result:
+                logger.error("No result returned from acquire_token_for_client()")
+                return None
+
+            if "access_token" in result:
+                logger.info(
+                    "Successfully acquired app-only token",
+                )
+                self._cached_token = result
+                # Note: App-only tokens don't have refresh tokens
+                # MSAL handles caching and refresh automatically
+                return result
+            else:
+                error = result.get("error", "unknown_error")
+                error_desc = result.get("error_description", "")
+                logger.error(
+                    "Failed to acquire app-only token: %s - %s",
+                    error,
+                    error_desc,
+                )
+                return None
+        except Exception as e:
+            logger.exception("Error acquiring app-only token: %s", e)
+            return None
+
+    def refresh_token(self) -> Optional[dict[str, Any]]:
+        """Refresh access token using refresh token (delegated mode only).
 
         Returns:
             New token response or None if failed
         """
+        if self.auth_mode != "delegated":
+            logger.warning("refresh_token() not needed in application mode")
+            return None
+
         # Load existing token
         token = self._cached_token or self.load_token()
         if not token:
@@ -133,7 +213,7 @@ class MSGraphAuthManager:
         try:
             result = self.app.acquire_token_by_refresh_token(
                 refresh_token=refresh_token_str,
-                scopes=GRAPH_SCOPES,
+                scopes=DELEGATED_SCOPES,
             )
 
             if "access_token" in result:
@@ -155,11 +235,20 @@ class MSGraphAuthManager:
             return None
 
     def get_valid_token(self) -> Optional[str]:
-        """Get a valid access token, refreshing if necessary.
+        """Get a valid access token for the configured auth mode.
+
+        For delegated mode: Uses cached token or refresh token
+        For application mode: Acquires new app-only token
 
         Returns:
             Valid access token string or None if unable to get token
         """
+        if self.auth_mode == "application":
+            # For app-only, always get fresh token (MSAL caches internally)
+            token = self.get_app_only_token()
+            return token.get("access_token") if token else None
+
+        # Delegated mode
         # Check if we have a cached token
         token = self._cached_token or self.load_token()
         if not token:
@@ -180,7 +269,7 @@ class MSGraphAuthManager:
         # For now, rely on 401 responses to trigger refresh
         return access_token
 
-    def save_token(self, token: Dict[str, Any]) -> None:
+    def save_token(self, token: dict[str, Any]) -> None:
         """Persist token to disk.
 
         Args:
@@ -194,7 +283,7 @@ class MSGraphAuthManager:
         except Exception as e:
             logger.exception("Failed to save token: %s", e)
 
-    def load_token(self) -> Optional[Dict[str, Any]]:
+    def load_token(self) -> Optional[dict[str, Any]]:
         """Load token from disk.
 
         Returns:

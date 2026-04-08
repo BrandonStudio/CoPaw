@@ -205,11 +205,27 @@ class WeixinConfig(BaseChannelConfig):
 class EmailMSGraphConfig(BaseChannelConfig):
     """Email channel using Microsoft Graph API.
 
+    Authentication Mode:
+        auth_mode: "delegated" (user authorization) or "application" (app-only)
+
+        - "delegated": Uses Authorization Code Flow, requires user login once.
+                      Best for personal mailboxes or accessing shared mailboxes
+                      where a user has "Send on Behalf" permissions.
+
+        - "application": Uses Client Credentials Flow, fully automated.
+                        Best for service accounts, public mailboxes, or daemon scenarios.
+                        Requires Application Access Policy configuration in Exchange.
+
     OAuth2 Authentication:
         tenant_id:     Azure AD tenant ID (or 'common' for multi-tenant)
         client_id:     Application (client) ID from Azure Portal
         client_secret: Client secret value
-        redirect_uri:  OAuth2 redirect URI (must match Azure app config)
+        redirect_uri:  OAuth2 redirect URI (only for delegated mode)
+
+    Mailbox Configuration:
+        mailbox_id: Email address or user ID to access (e.g., "support@company.com")
+                   For delegated mode: Defaults to "me" (authenticated user's mailbox)
+                   For application mode: Required (specify target mailbox)
 
     Receive Mode:
         receive_mode:       "polling" or "webhook"
@@ -224,6 +240,9 @@ class EmailMSGraphConfig(BaseChannelConfig):
         subject_prefix:   Only process emails with this subject prefix (empty = all)
     """
 
+    # Authentication mode
+    auth_mode: str = "delegated"  # "delegated" or "application"
+
     # OAuth2 authentication
     tenant_id: str = ""
     client_id: str = ""
@@ -231,6 +250,9 @@ class EmailMSGraphConfig(BaseChannelConfig):
     redirect_uri: str = (
         "http://localhost:8080/api/channels/email_ms_graph/callback"
     )
+
+    # Mailbox to access
+    mailbox_id: str = "me"  # "me" or email address like "support@company.com"
 
     # Receive mode
     receive_mode: str = "polling"  # "polling" or "webhook"
@@ -243,7 +265,7 @@ class EmailMSGraphConfig(BaseChannelConfig):
     )
 
     # Mail filtering
-    allowed_senders: list = []
+    allowed_senders: list[str] = []
     subject_prefix: str = ""
 
 

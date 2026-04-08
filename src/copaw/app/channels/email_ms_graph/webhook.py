@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
-import hashlib
 import logging
-from typing import Optional, Dict, Any, Callable
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Callable
 
 from .graph_client import MSGraphClient
+
+if TYPE_CHECKING:
+    from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class WebhookManager:
         self,
         graph_client: MSGraphClient,
         notification_url: str,
-        on_notification: Callable[[Dict[str, Any]], None],
+        on_notification: Callable[[dict[str, Any]], None],
     ):
         """Initialize webhook manager.
 
@@ -217,7 +218,7 @@ class WebhookManager:
 
     def validate_notification(
         self,
-        notification_data: Dict[str, Any],
+        notification_data: dict[str, Any],
         expected_client_state: str = "CoPawEmailChannel",
     ) -> bool:
         """Validate webhook notification.
@@ -244,7 +245,7 @@ class WebhookManager:
 
         return True
 
-    def handle_notification(self, notification_data: Dict[str, Any]) -> None:
+    def handle_notification(self, notification_data: dict[str, Any]) -> None:
         """Handle incoming webhook notification.
 
         Args:
@@ -261,7 +262,7 @@ class WebhookManager:
         for item in value_list:
             change_type = item.get("changeType", "")
             resource = item.get("resource", "")
-            resource_data = item.get("resourceData", {})
+            _ = item.get("resourceData", {})  # Reserved for future use
 
             logger.debug(
                 "Notification: changeType=%s, resource=%s",

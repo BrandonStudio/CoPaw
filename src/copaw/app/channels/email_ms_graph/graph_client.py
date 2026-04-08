@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from .auth import MSGraphAuthManager
+
+if TYPE_CHECKING:
+    from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +26,30 @@ class MSGraphClient:
     def __init__(
         self,
         auth_manager: MSGraphAuthManager,
+        mailbox_id: str = "me",
         timeout: float = DEFAULT_TIMEOUT,
     ):
         """Initialize Graph API client.
 
         Args:
             auth_manager: Authentication manager instance
+            mailbox_id: Mailbox to access ("me" or email address like "support@company.com")
             timeout: HTTP request timeout in seconds
         """
         self.auth = auth_manager
+        self.mailbox_id = mailbox_id
         self.timeout = timeout
         self._http_client: Optional[httpx.AsyncClient] = None
+
+    def _get_mailbox_path(self) -> str:
+        """Get the mailbox API path based on mailbox_id.
+
+        Returns:
+            "/me" or "/users/{email}"
+        """
+        if self.mailbox_id == "me":
+            return "/me"
+        return f"/users/{self.mailbox_id}"
 
     async def _get_http_client(self) -> httpx.AsyncClient:
         """Get or create async HTTP client."""
@@ -46,14 +62,14 @@ class MSGraphClient:
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
 
-    async def _make_request(
+    async def _make_request(  # pylint: disable=too-many-return-statements
         self,
         method: str,
         endpoint: str,
-        json_data: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None,
+        json_data: Optional[dict[str, Any]] = None,
+        params: Optional[dict[str, Any]] = None,
         retry_count: int = 1,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """Make HTTP request to Graph API with retry logic.
 
         Args:
@@ -98,9 +114,9 @@ class MSGraphClient:
                         token = new_token_data.get("access_token")
                         headers["Authorization"] = f"Bearer {token}"
                         continue
-                    else:
-                        logger.error("Failed to refresh token")
-                        return None
+
+                    logger.error("Failed to refresh token")
+                    return None
 
                 if response.status_code == 429:
                     # Rate limited
@@ -151,9 +167,9 @@ class MSGraphClient:
         self,
         folder: str = "inbox",
         filter_query: Optional[str] = None,
-        select_fields: Optional[List[str]] = None,
+        select_fields: Optional[list[str]] = None,
         top: int = 10,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List messages from a mail folder.
 
         Args:
@@ -165,8 +181,8 @@ class MSGraphClient:
         Returns:
             List of message objects
         """
-        endpoint = f"/me/mailFolders/{folder}/messages"
-        params: Dict[str, Any] = {
+        endpoint = f"{self._get_mailbox_path()}/mailFolders/{folder}/messages"
+        params: dict[str, Any] = {
             "$top": top,
             "$orderby": "receivedDateTime desc",
         }
@@ -182,7 +198,7 @@ class MSGraphClient:
             return result["value"]
         return []
 
-    async def get_message(self, message_id: str) -> Optional[Dict[str, Any]]:
+    async def get_message(self, message_id: str) -> Optional[dict[str, Any]]:
         """Get a specific message by ID.
 
         Args:
@@ -191,17 +207,17 @@ class MSGraphClient:
         Returns:
             Message object or None if not found
         """
-        endpoint = f"/me/messages/{message_id}"
+        endpoint = f"{self._get_mailbox_path()}/messages/{message_id}"
         return await self._make_request("GET", endpoint)
 
     async def send_mail(
         self,
-        to_recipients: List[str],
+        to_recipients: list[str],
         subject: str,
         body_content: str,
         body_type: str = "HTML",
-        cc_recipients: Optional[List[str]] = None,
-        bcc_recipients: Optional[List[str]] = None,
+        cc_recipients: Optional[list[str]] = None,
+        bcc_recipients: Optional[list[str]] = None,
     ) -> bool:
         """Send a new email.
 
@@ -240,7 +256,7 @@ class MSGraphClient:
                 {"emailAddress": {"address": addr}} for addr in bcc_recipients
             ]
 
-        endpoint = "/me/sendMail"
+        endpoint = f"{self._get_mailbox_path()}/sendMail"
         result = await self._make_request(
             "POST",
             endpoint,
@@ -252,29 +268,21 @@ class MSGraphClient:
         self,
         message_id: str,
         body_content: str,
-        body_type: str = "HTML",
     ) -> bool:
         """Reply to an existing message.
 
         Args:
             message_id: ID of message to reply to
-            body_content: Reply body content
-            body_type: Body content type ("Text" or "HTML")
+            body_content: Reply body content (HTML formatted)
 
         Returns:
             True if sent successfully
         """
         reply_data = {
             "comment": body_content,
-            "message": {
-                "body": {
-                    "contentType": body_type,
-                    "content": body_content,
-                },
-            },
         }
 
-        endpoint = f"/me/messages/{message_id}/reply"
+        endpoint = f"{self._get_mailbox_path()}/messages/{message_id}/reply"
         result = await self._make_request(
             "POST",
             endpoint,
@@ -291,7 +299,7 @@ class MSGraphClient:
         Returns:
             True if marked successfully
         """
-        endpoint = f"/me/messages/{message_id}"
+        endpoint = f"{self._get_mailbox_path()}/messages/{message_id}"
         data = {"isRead": True}
         result = await self._make_request("PATCH", endpoint, json_data=data)
         return result is not None
@@ -300,7 +308,7 @@ class MSGraphClient:
         self,
         notification_url: str,
         expiration_minutes: int = 4230,  # Max: 3 days (4320 min), use 4230 for safety
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """Create a webhook subscription for email notifications.
 
         Args:
@@ -311,15 +319,14 @@ class MSGraphClient:
             Subscription object with id and expirationDateTime, or None if failed
         """
         # Calculate expiration time
-        expiration_dt = datetime.now(timezone.utc)
-        from datetime import timedelta
-
-        expiration_dt += timedelta(minutes=expiration_minutes)
+        expiration_dt = datetime.now(timezone.utc) + timedelta(
+            minutes=expiration_minutes,
+        )
 
         subscription_data = {
             "changeType": "created",
             "notificationUrl": notification_url,
-            "resource": "me/mailFolders('Inbox')/messages",
+            "resource": f"{self._get_mailbox_path()}/mailFolders('Inbox')/messages",
             "expirationDateTime": expiration_dt.isoformat(),
             "clientState": "CoPawEmailChannel",  # For validation
         }
@@ -335,7 +342,7 @@ class MSGraphClient:
         self,
         subscription_id: str,
         expiration_minutes: int = 4230,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> Optional[dict[str, Any]]:
         """Renew an existing subscription.
 
         Args:
@@ -345,10 +352,9 @@ class MSGraphClient:
         Returns:
             Updated subscription object or None if failed
         """
-        expiration_dt = datetime.now(timezone.utc)
-        from datetime import timedelta
-
-        expiration_dt += timedelta(minutes=expiration_minutes)
+        expiration_dt = datetime.now(timezone.utc) + timedelta(
+            minutes=expiration_minutes,
+        )
 
         update_data = {
             "expirationDateTime": expiration_dt.isoformat(),

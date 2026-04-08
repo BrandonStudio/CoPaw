@@ -136,14 +136,14 @@ def extract_sender_name(message: dict) -> str:
 
 def should_process_message(
     message: dict,
-    allowed_senders: list[str],
+    allowed_senders: set[str],
     subject_prefix: str,
 ) -> bool:
     """Check if message should be processed based on filters.
 
     Args:
         message: MS Graph API message object
-        allowed_senders: List of allowed sender email addresses (empty = all)
+        allowed_senders: Set of allowed sender email addresses (empty = all)
         subject_prefix: Required subject prefix (empty = all)
 
     Returns:
