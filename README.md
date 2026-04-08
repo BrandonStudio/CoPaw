@@ -38,7 +38,7 @@ Your personal AI assistant — easy to install, deploy locally or in the cloud, 
 >
 > **Multi-layer security** — Tool guard, file access control, skill security scanning to ensure safe operation.
 >
-> **Every channel** — DingTalk, Feishu, WeChat, Discord, Telegram, and more. One CoPaw, connect as needed.
+> **Every channel** — DingTalk, Feishu, WeChat, Discord, Telegram, Email (MS Graph), and more. One CoPaw, connect as needed.
 >
 > <details>
 > <summary><b>What you can do with CoPaw</b></summary>
